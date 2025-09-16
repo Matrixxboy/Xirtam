@@ -3,16 +3,33 @@ import asyncio
 from dotenv import load_dotenv
 import discord
 from discord.ext import commands
+from flask import Flask
+import threading
 
 # Load environment variables
 load_dotenv()
 BOT_TOKEN = os.getenv('BOT_TOKEN')
 GUILD_ID = int(os.getenv('GUILD_ID'))
 
+# --- Flask server for Render ---
+app = Flask(__name__)
+
+@app.route("/")
+def home():
+    return "✅ Xirtam Bot is running!"
+
+def run_web():
+    port = int(os.environ.get("PORT", 8080))  # Render provides the PORT environment variable
+    app.run(host="0.0.0.0", port=port)
+
+# Start Flask server in a separate thread
+threading.Thread(target=run_web).start()
+
+# --- Discord Bot Setup ---
 class MyBot(commands.Bot):
     def __init__(self):
         super().__init__(
-            command_prefix='!', # Prefix is required but we are using slash commands
+            command_prefix='!',  # Prefix is required but we are using slash commands
             intents=discord.Intents.default()
         )
 
@@ -22,7 +39,6 @@ class MyBot(commands.Bot):
             for file in files:
                 if file.endswith('.py'):
                     path = os.path.join(root, file)
-                    # Convert path to cog format (e.g., cogs/basic.py -> cogs.basic)
                     cog_name = path.replace(os.sep, '.')[:-3]
                     try:
                         await self.load_extension(cog_name)

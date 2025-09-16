@@ -1,6 +1,6 @@
-# NexGen Bot: Development Guide
+# Xirtam Bot: Development Guide
 
-NexGen Bot is a multipurpose Discord bot designed to be a central hub for community management and engagement. It features a modular architecture that allows for easy expansion and maintenance.
+Xirtam Bot is a multipurpose Discord bot designed to be a central hub for community management and engagement. It features a modular architecture that allows for easy expansion and maintenance.
 
 ## Project Structure
 
