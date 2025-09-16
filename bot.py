@@ -1,59 +1,48 @@
 import os
+import asyncio
 from dotenv import load_dotenv
 import discord
-from discord import app_commands
+from discord.ext import commands
 
-# Load BOT TOKEN from .env
+# Load environment variables
 load_dotenv()
 BOT_TOKEN = os.getenv('BOT_TOKEN')
-
-# Replace this with your actual Discord Server ID
 GUILD_ID = int(os.getenv('GUILD_ID'))
 
-class MyClient(discord.Client):
-    def __init__(self, *, intents: discord.Intents):
-        super().__init__(intents=intents)
-        self.tree = app_commands.CommandTree(self)
+class MyBot(commands.Bot):
+    def __init__(self):
+        super().__init__(
+            command_prefix='!', # Prefix is required but we are using slash commands
+            intents=discord.Intents.default()
+        )
 
-    async def on_ready(self):
-        # Sync only to the specific guild (instant updates)
+    async def setup_hook(self):
+        # Load all cogs
+        for root, dirs, files in os.walk('cogs'):
+            for file in files:
+                if file.endswith('.py'):
+                    path = os.path.join(root, file)
+                    # Convert path to cog format (e.g., cogs/basic.py -> cogs.basic)
+                    cog_name = path.replace(os.sep, '.')[:-3]
+                    try:
+                        await self.load_extension(cog_name)
+                        print(f"✅ Loaded cog: {cog_name}")
+                    except Exception as e:
+                        print(f"❌ Failed to load cog {cog_name}: {e}")
+
+        # Sync commands to guild
         guild = discord.Object(id=GUILD_ID)
         self.tree.copy_global_to(guild=guild)
         await self.tree.sync(guild=guild)
         print(f"✅ Logged in as {self.user}")
-        print("✅ Slash commands synced to your server instantly!")
+        print("✅ Slash commands synced to your server!")
 
-# Intents setup
-intents = discord.Intents.default()
-intents.message_content = True
+async def main():
+    bot = MyBot()
+    await bot.start(BOT_TOKEN)
 
-# Create client
-client = MyClient(intents=intents)
-
-# Slash command: hello
-@client.tree.command(name="hello", description="The bot says hello back to you")
-async def hello(interaction: discord.Interaction):
-    await interaction.response.send_message(
-        f"Hello, {interaction.user.mention}! I'm now using slash commands."
-    )
-
-# Slash command: sync (owner only)
-@client.tree.command(name="sync", description="Sync slash commands (owner only)")
-async def sync(interaction: discord.Interaction):
-    OWNER_ID = int(os.getenv("OWNER_ID"))  # Replace with your Discord ID
-    if interaction.user.id != OWNER_ID:
-        await interaction.response.send_message("❌ You are not the owner!", ephemeral=True)
-        return
-
+if __name__ == "__main__":
     try:
-        guild = discord.Object(id=GUILD_ID)
-        synced = await client.tree.sync(guild=guild)
-        await interaction.response.send_message(f"✅ Synced {len(synced)} command(s) to the server.")
+        asyncio.run(main())
     except Exception as e:
-        await interaction.response.send_message(f"❌ Failed to sync commands: {e}")
-
-# Run bot
-try:
-    client.run(BOT_TOKEN)
-except Exception as e:
-    print(f"Error occurred: {e}")
+        print(f"Error occurred: {e}")
