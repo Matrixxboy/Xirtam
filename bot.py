@@ -34,6 +34,11 @@ class MyBot(commands.Bot):
         )
 
     async def setup_hook(self):
+        # Initialize Database
+        from database.connection import init_db
+        await init_db()
+        print("✅ MongoDB initialized")
+
         # Load all cogs
         for root, dirs, files in os.walk('cogs'):
             for file in files:

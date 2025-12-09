@@ -11,80 +11,45 @@ def is_owner():
         return await interaction.client.is_owner(interaction.user)
     return app_commands.check(predicate)
 
-class HelpPaginator(ui.View):
-    def __init__(self, embeds: list[discord.Embed]):
-        super().__init__(timeout=180) # Timeout after 3 minutes of inactivity
-        self.embeds = embeds
-        self.current_page = 0
-        self.update_buttons()
 
-    def update_buttons(self):
-        self.children[0].disabled = (self.current_page == 0) # Previous button
-        self.children[1].disabled = (self.current_page == len(self.embeds) - 1) # Next button
-
-    async def on_timeout(self):
-        for item in self.children:
-            item.disabled = True
-        await self.message.edit(view=self)
-
-    @ui.button(label="Previous", style=discord.ButtonStyle.blurple)
-    async def previous_button(self, interaction: discord.Interaction, button: ui.Button):
-        if self.current_page > 0:
-            self.current_page -= 1
-            self.update_buttons()
-            await interaction.response.edit_message(embed=self.embeds[self.current_page], view=self)
-        else:
-            await interaction.response.defer() # Do nothing if already on first page
-
-    @ui.button(label="Next", style=discord.ButtonStyle.blurple)
-    async def next_button(self, interaction: discord.Interaction, button: ui.Button):
-        if self.current_page < len(self.embeds) - 1:
-            self.current_page += 1
-            self.update_buttons()
-            await interaction.response.edit_message(embed=self.embeds[self.current_page], view=self)
-        else:
-            await interaction.response.defer() # Do nothing if already on last page
 
 class Core(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
-    async def create_help_pages(self) -> list[discord.Embed]:
-        embeds = []
-        for cog_name, cog in self.bot.cogs.items():
-            commands_list = cog.get_app_commands()
-            if commands_list:
-                embed = discord.Embed(
-                    title=f"NexGen Bot Help: {cog_name}",
-                    description=f"Commands for the {cog_name} module:",
-                    color=discord.Color.blue(),
-                    timestamp=datetime.datetime.utcnow()
-                )
-                if self.bot.user.avatar:
-                    embed.set_thumbnail(url=self.bot.user.avatar.url)
-                
-                for command in commands_list:
-                    # Handle command groups
-                    if isinstance(command, app_commands.Group):
-                        subcommands_str = "\n".join([f"`/{command.name} {sub.name}` - {sub.description}" for sub in command.commands])
-                        if subcommands_str:
-                            embed.add_field(name=f"**/{command.name}** (Group)", value=subcommands_str, inline=False)
-                    else:
-                        embed.add_field(name=f"**/{command.name}**", value=command.description, inline=False)
-                
-                embed.set_footer(text=f"Page {len(embeds) + 1}/{len(self.bot.cogs)}")
-                embeds.append(embed)
-        return embeds
+    
 
     # --- Commands ---
-    @app_commands.command(name="help", description="Displays a list of all available commands.")
-    async def help(self, interaction: discord.Interaction):
-        embeds = await self.create_help_pages()
-        if not embeds:
-            return await interaction.response.send_message("No commands found.", ephemeral=True)
-        
-        paginator = HelpPaginator(embeds)
-        paginator.message = await interaction.response.send_message(embed=embeds[0], view=paginator, ephemeral=True)
+    
+
+    @app_commands.command(name="about", description="Shows information about the bot and its creator.")
+    async def about(self, interaction: discord.Interaction):
+        embed = discord.Embed(
+            title="🤖 About Xirtam",
+            description=(
+                "Xirtam is a **multi-purpose Discord bot** built with "
+                "`Python` and `discord.py`.\n\n"
+                "It is designed to make your server **more fun, productive, and secure** 🎉"
+            ),
+            color=discord.Color.purple(),
+            timestamp=datetime.datetime.utcnow()
+        )
+
+        embed.add_field(name="👨‍💻 Creator", value="**Utsav Lankapati**", inline=True)
+        embed.add_field(name="🌐 Website", value="[Utsav Lankapati](https://utsav-lankapati.onrender.com)", inline=True)
+        embed.add_field(name="📂 GitHub", value="[Matrixxboy/Xirtam](https://github.com/Matrixxboy/Xirtam)", inline=True)
+        embed.add_field(name="⚙️ Version", value="`1.0.0`", inline=True)
+        embed.add_field(name="📚 Library", value="`discord.py 2.x`", inline=True)
+        embed.add_field(name="🌐 Language", value="`Python 3.11+`", inline=True)
+        embed.add_field(name="💬 Support", value="[Join Discord](https://discord.gg/membBFG896)", inline=True)
+
+        # Optional: set bot avatar as thumbnail
+        if interaction.client.user.avatar:
+            embed.set_thumbnail(url=interaction.client.user.avatar.url)
+
+        embed.set_footer(text="Made with ❤️ by Utsav Lankapati")
+
+        await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="serverinfo", description="Shows information about the server.")
     async def serverinfo(self, interaction: discord.Interaction):

@@ -9,10 +9,6 @@ from discord.ext import commands
 class Engagement(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.coin_images = {
-            "Heads": "https://upload.wikimedia.org/wikipedia/commons/thumb/a/a0/2006_Quarter_Proof.png/780px-2006_Quarter_Proof.png",
-            "Tails": "https://upload.wikimedia.org/wikipedia/commons/thumb/6/6f/1792_half_disme_obverse.jpg/780px-1792_half_disme_obverse.jpg"
-        }
         self.number_emojis = ["1️⃣", "2️⃣", "3️⃣", "4️⃣", "5️⃣", "6️⃣", "7️⃣", "8️⃣", "9️⃣", "🔟"]
 
     @app_commands.command(name="poll", description="Creates a poll with up to 10 options.")
@@ -54,9 +50,15 @@ class Engagement(commands.Cog):
     @app_commands.command(name="coinflip", description="Flips a coin.")
     async def coinflip(self, interaction: discord.Interaction):
         result = random.choice(["Heads", "Tails"])
-        embed = discord.Embed(title="Coin Flip", description=f"The coin landed on **{result}**!", color=discord.Color.gold(), timestamp=datetime.datetime.utcnow())
-        embed.set_thumbnail(url=self.coin_images[result])
-        await interaction.response.send_message(embed=embed)
+        if result == "Heads":
+            file = discord.File("public/coin/heads.png", filename="heads.png")
+            embed = discord.Embed(title="Coin Flip", description=f"The coin landed on **{result}**!", color=discord.Color.gold(), timestamp=datetime.datetime.utcnow())
+            embed.set_thumbnail(url="attachment://heads.png")
+        else:
+            file = discord.File("public/coin/tails.png", filename="tails.png")
+            embed = discord.Embed(title="Coin Flip", description=f"The coin landed on **{result}**!", color=discord.Color.gold(), timestamp=datetime.datetime.utcnow())
+            embed.set_thumbnail(url="attachment://tails.png")
+        await interaction.response.send_message(embed=embed, file=file)
 
     @app_commands.command(name="rolldice", description="Rolls dice in NdN format (e.g., 2d6).")
     async def rolldice(self, interaction: discord.Interaction, dice: str):

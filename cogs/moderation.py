@@ -2,14 +2,30 @@ import discord
 import datetime
 from discord import app_commands
 from discord.ext import commands
+from database.models import ModCase
 
 class Moderation(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
 
     async def create_mod_log_embed(self, interaction: discord.Interaction, action: str, user: discord.User, reason: str, color: discord.Color):
+        # Save to MongoDB
+        # Calculate case_id: Find max case_id for this guild and add 1
+        last_case = await ModCase.find(ModCase.guild_id == interaction.guild_id).sort("-case_id").first_or_none()
+        new_case_id = (last_case.case_id + 1) if last_case else 1
+
+        mod_case = ModCase(
+            case_id=new_case_id,
+            guild_id=interaction.guild_id,
+            user_id=user.id,
+            moderator_id=interaction.user.id,
+            action=action,
+            reason=reason
+        )
+        await mod_case.create()
+
         embed = discord.Embed(
-            title=f"{action}: {user.name}",
+            title=f"{action} | Case #{new_case_id}: {user.name}",
             color=color,
             timestamp=datetime.datetime.utcnow()
         )
@@ -82,6 +98,32 @@ class Moderation(commands.Cog):
         await interaction.response.defer(ephemeral=True)
         deleted = await interaction.channel.purge(limit=amount)
         await interaction.followup.send(f"✅ Deleted {len(deleted)} messages.")
+
+    @app_commands.command(name="modlogs", description="View moderation logs for a user.")
+    @app_commands.checks.has_permissions(kick_members=True)
+    async def modlogs(self, interaction: discord.Interaction, user: discord.User):
+        cases = await ModCase.find(
+            ModCase.guild_id == interaction.guild_id,
+            ModCase.user_id == user.id
+        ).sort("-case_id").limit(10).to_list()
+        
+        if not cases:
+            return await interaction.response.send_message(f"No moderation logs found for {user.mention}.", ephemeral=True)
+            
+        embed = discord.Embed(
+            title=f"Moderation Logs: {user.name}",
+            color=discord.Color.blue(),
+            timestamp=datetime.datetime.utcnow()
+        )
+        
+        for case in cases:
+            embed.add_field(
+                name=f"Case #{case.case_id} | {case.action}",
+                value=f"**Reason:** {case.reason}\n**Mod:** <@{case.moderator_id}>\n**Date:** <t:{int(case.timestamp.timestamp())}:d>",
+                inline=False
+            )
+            
+        await interaction.response.send_message(embed=embed)
 
     # --- Error Handling ---
     async def cog_app_command_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError):

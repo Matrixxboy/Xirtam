@@ -4,6 +4,7 @@ import random
 import datetime
 from discord import app_commands
 from discord.ext import commands
+from database.models import Giveaway
 
 def parse_duration(duration_str: str) -> int:
     unit = duration_str[-1].lower()
@@ -17,8 +18,22 @@ def parse_duration(duration_str: str) -> int:
 class Giveaways(commands.Cog):
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.completed_giveaways = {}
-        self.active_giveaways = {}
+        # We can now rely on DB for active giveaways persistence
+        # but for performance in small scale, a cache is fine.
+        # However, for true persistence across restart, we should load from DB on startup.
+        self.active_giveaways_cache = {}
+
+    async def cog_load(self):
+        # Load active giveaways from DB on startup
+        active = await Giveaway.find(Giveaway.status == "active").to_list()
+        for g in active:
+            # Re-schedule the finish task if end time is in future
+            remaining = (g.end_time - datetime.datetime.utcnow()).total_seconds()
+            if remaining > 0:
+                self.bot.loop.create_task(self.monitor_giveaway(g.message_id, remaining))
+            else:
+                 # It should have ended, run end logic immediately
+                 self.bot.loop.create_task(self.end_giveaway(g.message_id))
 
     giveaway_group = app_commands.Group(name="giveaway", description="Commands for managing giveaways.")
 
@@ -44,52 +59,68 @@ class Giveaways(commands.Cog):
         giveaway_message = await interaction.channel.send(embed=embed)
         await giveaway_message.add_reaction("🎉")
 
-        debug_message = (
-            f"**DEBUG INFO (Giveaway Time)**\n"
-            f"Calculated UTC End Time: `{end_time}`\n"
-            f"Raw Unix Timestamp: `{int(end_time.timestamp())}`\n"
-            f"Timezone Info: `{end_time.tzinfo}`"
+        # Save to DB
+        ga_doc = Giveaway(
+            _id=giveaway_message.id,
+            channel_id=interaction.channel.id,
+            guild_id=interaction.guild_id,
+            prize=prize,
+            end_time=end_time,
+            winners_count=winners,
+            status="active"
         )
-        await interaction.followup.send(debug_message, ephemeral=True)
+        await ga_doc.create()
 
-        self.active_giveaways[giveaway_message.id] = {
-            "prize": prize,
-            "end_time": end_time,
-            "winners": winners,
-            "channel_id": interaction.channel.id
-        }
+        # Schedule end
+        self.bot.loop.create_task(self.monitor_giveaway(giveaway_message.id, seconds))
 
-        await asyncio.sleep(seconds)
+    async def monitor_giveaway(self, message_id: int, duration: float):
+        await asyncio.sleep(duration)
+        await self.end_giveaway(message_id)
 
+    async def end_giveaway(self, message_id: int):
+        ga = await Giveaway.get(message_id)
+        if not ga or ga.status != "active":
+            return
+        
+        ga.status = "ended"
+        
+        channel = self.bot.get_channel(ga.channel_id)
+        if not channel:
+            # Channel deleted? Mark ended
+            await ga.save()
+            return
+            
         try:
-            updated_message = await interaction.channel.fetch_message(giveaway_message.id)
+            message = await channel.fetch_message(message_id)
         except discord.NotFound:
-            if giveaway_message.id in self.active_giveaways:
-                del self.active_giveaways[giveaway_message.id]
+            await ga.save()
             return
 
-        reaction = discord.utils.get(updated_message.reactions, emoji="🎉")
-        participants = [user async for user in reaction.users() if not user.bot]
-        self.completed_giveaways[updated_message.id] = participants
-
-        if giveaway_message.id in self.active_giveaways:
-            del self.active_giveaways[giveaway_message.id]
+        reaction = discord.utils.get(message.reactions, emoji="🎉")
+        if not reaction:
+             participants = []
+        else:
+             participants = [user.id async for user in reaction.users() if not user.bot]
+        
+        ga.participants = participants
+        await ga.save()
 
         if not participants:
-            ended_embed = discord.Embed(title=f"Giveaway Ended: {prize}", description="No one entered the giveaway.", color=discord.Color.dark_grey(), timestamp=datetime.datetime.utcnow())
-            await updated_message.edit(embed=ended_embed)
+            ended_embed = discord.Embed(title=f"Giveaway Ended: {ga.prize}", description="No one entered the giveaway.", color=discord.Color.dark_grey(), timestamp=datetime.datetime.utcnow())
+            await message.edit(embed=ended_embed)
             return
 
-        winner_list = random.sample(participants, k=min(winners, len(participants)))
-        winner_mentions = ", ".join([winner.mention for winner in winner_list])
+        winner_ids = random.sample(participants, k=min(ga.winners_count, len(participants)))
+        winner_mentions = ", ".join([f"<@{uid}>" for uid in winner_ids])
         
         result_embed = discord.Embed(
-            title=f"🎉 Giveaway Ended: {prize} 🎉",
-            description=f"Congratulations to {winner_mentions}! You won the **{prize}**.",
+            title=f"🎉 Giveaway Ended: {ga.prize} 🎉",
+            description=f"Congratulations to {winner_mentions}! You won the **{ga.prize}**.",
             color=discord.Color.green(),
             timestamp=datetime.datetime.utcnow()
         )
-        await updated_message.reply(embed=result_embed)
+        await message.reply(embed=result_embed)
 
     @giveaway_group.command(name="reroll", description="Rerolls a completed giveaway.")
     @app_commands.checks.has_permissions(manage_guild=True)
@@ -99,18 +130,18 @@ class Giveaways(commands.Cog):
         except ValueError:
             return await interaction.response.send_message("❌ Invalid message ID.", ephemeral=True)
 
-        if msg_id not in self.completed_giveaways:
-            return await interaction.response.send_message("❌ This is not a completed giveaway message ID or it is too old.", ephemeral=True)
+        ga = await Giveaway.get(msg_id)
+        if not ga or ga.status != "ended":
+             return await interaction.response.send_message("❌ This is not a completed giveaway or not found in DB.", ephemeral=True)
 
-        participants = self.completed_giveaways[msg_id]
-        if not participants:
+        if not ga.participants:
             return await interaction.response.send_message("❌ There were no participants in this giveaway.", ephemeral=True)
 
-        new_winner = random.choice(participants)
+        new_winner_id = random.choice(ga.participants)
         
         embed = discord.Embed(
             title="🎉 Giveaway Reroll 🎉",
-            description=f"The new winner is {new_winner.mention}! Congratulations!",
+            description=f"The new winner is <@{new_winner_id}>! Congratulations!",
             color=discord.Color.gold(),
             timestamp=datetime.datetime.utcnow()
         )
@@ -118,7 +149,9 @@ class Giveaways(commands.Cog):
 
     @giveaway_group.command(name="list", description="Lists all active giveaways.")
     async def giveaway_list(self, interaction: discord.Interaction):
-        if not self.active_giveaways:
+        active = await Giveaway.find(Giveaway.guild_id == interaction.guild_id, Giveaway.status == "active").to_list()
+        
+        if not active:
             embed = discord.Embed(
                 title="No Active Giveaways",
                 description="There are currently no active giveaways.",
@@ -128,10 +161,10 @@ class Giveaways(commands.Cog):
             return await interaction.response.send_message(embed=embed, ephemeral=True)
 
         embed = discord.Embed(title="Active Giveaways", color=discord.Color.blue(), timestamp=datetime.datetime.utcnow())
-        for msg_id, giveaway in self.active_giveaways.items():
+        for ga in active:
             embed.add_field(
-                name=f"Prize: {giveaway['prize']}",
-                value=f"Ends: <t:{int(giveaway['end_time'].timestamp())}:F>\nWinners: {giveaway['winners']}\n[Jump to Giveaway](https://discord.com/channels/{interaction.guild.id}/{giveaway['channel_id']}/{msg_id})",
+                name=f"Prize: {ga.prize}",
+                value=f"Ends: <t:{int(ga.end_time.timestamp())}:F>\nWinners: {ga.winners_count}\n[Jump to Giveaway](https://discord.com/channels/{interaction.guild_id}/{ga.channel_id}/{ga.message_id})",
                 inline=False
             )
         await interaction.response.send_message(embed=embed, ephemeral=True)
