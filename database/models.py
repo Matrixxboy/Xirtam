@@ -51,6 +51,7 @@ class Task(BaseModel):
     id: int
     description: str
     completed: bool = False
+    completed_by: Optional[int] = None
 
 class Project(Document):
     name: str
